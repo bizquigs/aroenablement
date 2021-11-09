@@ -1,0 +1,97 @@
+name: OpenShift
+
+env:
+  APP_NAME: node-express-app
+  SOURCE_DIR: src
+  NODE_VERSION: 12
+  OPENSHIFT_NAMESPACE: cicd-gh-actions
+  #TEST: ${{ secrets.MY_GITHUB_PAT }}
+
+on:
+  
+  push:
+    # Edit to the branch(es) you want to build and deploy on each push.
+    branches: [ lab-2 ]
+
+jobs:
+  # Begin installing runner
+  install_runner:
+    name: Install Private Runner
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log in to OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OPENSHIFT_SERVER }}
+          openshift_token: ${{ secrets.OPENSHIFT_TOKEN }}
+          insecure_skip_tls_verify: true
+          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
+      - name: Install runner
+        uses: redhat-actions/openshift-actions-runner-installer@v1
+        with:
+          github_pat: ${{ secrets.MY_GITHUB_PAT }}     # Personal access token with organization permissions 
+          runner_image: quay.io/redhat-github-actions/node-runner-14
+          runner_labels: self-hosted, openshift, node
+    # End installing runner
+
+  openshift-ci-cd:
+    name: Build and deploy on Self-Hosted OpenShift Runners
+    runs-on: [ self-hosted, openshift, node ]         # Use the same labels we gave the runner above
+    needs: install_runner                             # Wait until the job above completes
+    environment: production
+
+       
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup node
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+#---------------------------------
+      - name: Install CLI tools from OpenShift Mirror
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+
+          # "mirror" is the default source, so this is optional.
+          source: "mirror"
+
+          # Installs the latest kam release.
+          kam: "latest"
+
+          # Installs the latest release of oc with the major version 3.
+          # This is equivalent to "3.x" or "^3".
+          oc: "4"
+
+          # Installs the latest release of odo with the major version 2, and the minor version 0.
+          # This would install odo 2.0.3, but not odo 2.1.0.
+          odo: "2.0"
+
+          # This exact version will install version 0.11.0 of Tekton, no other version.
+          tkn: "0.11.0"
+#---------------------------------
+
+
+
+      - run: npm install
+        working-directory: ${{ env.SOURCE_DIR }}
+
+      #- run: npm test
+      #  working-directory: ${{ env.SOURCE_DIR }}
+
+      # https://github.com/redhat-actions/oc-login#readme
+      - name: Log in to OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OPENSHIFT_SERVER }}
+          openshift_token: ${{ secrets.OPENSHIFT_TOKEN }}
+          insecure_skip_tls_verify: true
+          namespace: ${{ env.OPENSHIFT_NAMESPACE }}
+
+      - name: Start oc S2I build
+        run: |
+          oc start-build ${{ env.APP_NAME }} --from-dir=${{ env.SOURCE_DIR }} --follow
+
+
